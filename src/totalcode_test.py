@@ -26,6 +26,8 @@ from src.learnable_textures import (
     LearnableImageRasterBilateral,
 )
 
+print('text')
+
 # Suppress partial model loading warning
 logging.set_verbosity_error()
 
