@@ -86,9 +86,7 @@ class StableDiffusion(nn.Module):
         return output_embeddings
 
     def train_step(self, text_embeddings:torch.Tensor, pred_rgb:torch.Tensor, guidance_scale:float=100, t:Optional[int]=None):
-        
-        # This method is responsible for generating the dream-loss gradients.
-        
+        '''This method is responsible for generating the dream-loss gradients.'''
         # interp to 512x512 to be fed into vae
         pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode='bilinear', align_corners=False)
 
@@ -118,10 +116,11 @@ class StableDiffusion(nn.Module):
         grad = w * (noise_pred - noise)
 
         mse_loss = ((noise_pred - noise) ** 2).mean().item()
-
+        uncond, cond = noise_pred_uncond.abs().mean().item(), noise_pred_text.abs().mean().item()
+        cont = (noise_pred_text - noise_pred_uncond).abs().mean().item()
         # manually backward, since we omitted an item in grad and cannot simply autodiff
         latents.backward(gradient=grad, retain_graph=True)
-        return mse_loss # dummy loss value
+        return (mse_loss, uncond, cond, cont)  # dummy loss value
 
     def produce_latents(self, text_embeddings:torch.Tensor, height:int=512, width:int=512, num_inference_steps=50, guidance_scale=7.5, latents=None)->torch.Tensor:
         assert len(text_embeddings.shape)==3 and text_embeddings.shape[-2:]==(77,768)

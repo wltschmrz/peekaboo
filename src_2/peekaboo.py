@@ -1,7 +1,7 @@
 import os
 import sys
 proj_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-src_dir = os.path.join(proj_dir, 'src_origin')
+src_dir = os.path.join(proj_dir, 'src_2')
 sys.path.extend([proj_dir, src_dir])
 
 from typing import Union, List, Optional
@@ -13,9 +13,9 @@ from torch.optim.lr_scheduler import LambdaLR
 from easydict import EasyDict
 import matplotlib.pyplot as plt
 
-import src_origin.stable_diffusion as sd
-from src_origin.bilateral_blur import BilateralProxyBlur
-from src_origin.learnable_textures import (
+import src_2.stable_diffusion as sd
+from src_2.bilateral_blur import BilateralProxyBlur
+from src_2.learnable_textures import (
     LearnableImageFourier,
     LearnableImageFourierBilateral,
     LearnableImageRasterSigmoided,
@@ -238,7 +238,7 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
     preview_interval=NUM_ITER//10 
     preview_interval=max(1,preview_interval)
 
-    l1, l2 = [], []
+    l1, l2, noi1, noi2, noi3 = [], [], [], [], []
     try:
         display_eta=rp.eta(NUM_ITER)
         for iter_num in range(NUM_ITER):
@@ -252,8 +252,9 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
 
             # for label, composite in zip(p.labels, composites):
             label, composite = p.labels[0], composites[0]
-            sdsloss = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
-            loss = alphas.sum() * GRAVITY
+            composite = composite * 0
+            sdsloss, unc, con, cont = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
+            loss = alphas.mean() * GRAVITY
             alphaloss = loss.item()
             loss += sdsloss
             loss.backward()
@@ -263,6 +264,9 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
 
             l1.append(sdsloss)
             l2.append(alphaloss)
+            noi1.append(unc)
+            noi2.append(con)
+            noi3.append(cont)
 
     except KeyboardInterrupt:
         print("Interrupted early, returning current results...")
@@ -320,11 +324,32 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
     plt.savefig(f'{output_folder}/loss_plot.png')
     plt.close()
 
+    # Loss plot 저장
+    plt.figure(figsize=(16, 9))
+    plt.subplot(3, 1, 1)
+    plt.plot(noi1, label='uncond')
+    plt.xlabel('Iteration'); plt.ylabel('abs mean')
+    plt.legend()
+
+    plt.subplot(3, 1, 2)
+    plt.plot(noi2, label='cond')
+    plt.xlabel('Iteration'); plt.ylabel('abs mean')
+    plt.legend()
+
+    plt.subplot(3, 1, 3)
+    plt.plot(noi3, label='cont')
+    plt.xlabel('Iteration'); plt.ylabel('abs mean')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig(f'{output_folder}/score_plot.png')
+    plt.close()
+
 if __name__ == "__main__":
     
     # # bilateral fourier 용도.
     # prms = {
-    #     'G': 1e-1/2,
+    #     'G': 3000,
     #     'iter': 300,
     #     'lr': 1e-5,
     #     'B': 1,
@@ -334,9 +359,9 @@ if __name__ == "__main__":
 
     # raster 용도.
     prms = {
-        'G': 1e-1/2,
+        'G': 3000,
         'iter': 300,
-        'lr': 0.1,
+        'lr': 1,
         'B': 1,
         'guidance': 100,
         'representation': 'raster',
