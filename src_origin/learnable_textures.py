@@ -200,7 +200,8 @@ class LearnableImageRaster(LearnableImage):
         
         assert output.shape==(self.num_channels, self.height, self.width)
         
-        return output
+        # return output
+        return torch.sigmoid(output)
     
     
     

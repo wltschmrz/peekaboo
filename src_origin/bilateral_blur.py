@@ -12,7 +12,6 @@ import torch
 import itertools
 import einops
 import rp
-import icecream
 
 __all__=['BilateralProxyBlur']
 
@@ -76,37 +75,6 @@ def shifted_image(image: torch.Tensor, dx: int, dy: int) -> torch.Tensor:
     assert output.shape == image.shape
 
     return output
-
-
-def test_shifted_image():
-    import torch, icecream
-    from rp import (
-        as_float_image,
-        as_numpy_image,
-        as_torch_image,
-        bordered_image_solid_color,
-        cv_resize_image,
-        display_image,
-        get_image_dimensions,
-        load_image,
-    )
-
-    image = "https://nationaltoday.com/wp-content/uploads/2020/02/doggy-date-night.jpg"
-    image = load_image(image)
-    image = as_float_image(image)
-    image = cv_resize_image(image, (64, 64))
-    height, width = get_image_dimensions(image)
-    image = as_torch_image(image)
-    for dx in [-64, -32, 0, 32, 64]:
-        for dy in [-64, -32, 0, 32, 64]:
-            im = shifted_image(image, dx, dy)
-            im = torch.nan_to_num(im)
-            im = as_numpy_image(im)
-            im = bordered_image_solid_color(im)
-
-            icecream.ic(dx, dy)
-            display_image(im)
-
 
 def get_weight_matrix(image:torch.Tensor, sigma:float, kernel_size:int, tolerance:float):
     #Return a 4d tensor corresponding to the weights needed to perform a bilateral blur

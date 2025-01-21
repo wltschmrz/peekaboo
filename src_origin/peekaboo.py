@@ -1,22 +1,25 @@
-from typing import Union, List, Optional
+import os
+import sys
+proj_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src_dir = os.path.join(proj_dir, 'src_origin')
+sys.path.extend([proj_dir, src_dir])
 
-import icecream
+from typing import Union, List, Optional
 import numpy as np
 import rp
 import torch
 import torch.nn as nn
 from easydict import EasyDict
-from IPython.display import clear_output
-from torchvision.transforms.functional import normalize
+import matplotlib.pyplot as plt
 
-import source.stable_diffusion as sd
-from source.bilateral_blur import BilateralProxyBlur
-from source.learnable_textures import (LearnableImageFourier,
-                                       LearnableImageFourierBilateral,
-                                       LearnableImageRaster,
-                                       LearnableImageRasterBilateral,
-                                       LearnableTexturePackFourier,
-                                       LearnableTexturePackRaster)
+import src_origin.stable_diffusion as sd
+from src_origin.bilateral_blur import BilateralProxyBlur
+from src_origin.learnable_textures import (
+    LearnableImageFourier,
+    LearnableImageFourierBilateral,
+    LearnableImageRaster,
+    LearnableImageRasterBilateral,
+    )
 
 def make_learnable_image(height, width, num_channels, foreground=None, bilateral_kwargs:dict={}, representation = 'fourier'):
     #Here we determine our image parametrization schema
@@ -37,7 +40,6 @@ def blend_torch_images(foreground, background, alpha):
     assert foreground.shape==background.shape
     C,H,W=foreground.shape
     assert alpha.shape==(H,W), 'alpha is a matrix'
-    
     return foreground*alpha + background*(1-alpha)
 
 class PeekabooSegmenter(nn.Module):
@@ -97,10 +99,9 @@ class PeekabooSegmenter(nn.Module):
         
     def forward(self, alphas=None, return_alphas=False):
         try:
-            old_min_step=s.min_step
-            old_max_step=s.max_step
-            s.min_step=self.min_step
-            s.max_step=self.max_step
+            old_min_step, old_max_step = sd.min_step, sd.max_step
+            if (self.min_step is not None) and (self.max_step is not None):
+                sd.min_step, sd.max_step = self.min_step, self.max_step
 
             output_images = []
 
@@ -124,95 +125,95 @@ class PeekabooSegmenter(nn.Module):
                 return output_images
 
         finally:
-            old_min_step=s.min_step
-            old_max_step=s.max_step 
+            sd.min_step = old_min_step
+            sd.max_step = old_max_step
 
-def display(self):
-    #This is a method of PeekabooSegmenter, but can be changed without rewriting the class if you want to change the display
+# def display(self):
+#     #This is a method of PeekabooSegmenter, but can be changed without rewriting the class if you want to change the display
 
-    colors = [(1,0,0), (0,1,0), (0,0,1),]#(1,0,0), (0,1,0), (0,0,1)] #Colors used to make the display
-    colors = [rp.random_rgb_float_color() for _ in range(3)]
-    alphas = rp.as_numpy_array(self.alphas())
-    image = self.image
-    assert alphas.shape==(self.num_labels, self.height, self.width)
+#     colors = [(1,0,0), (0,1,0), (0,0,1),]#(1,0,0), (0,1,0), (0,0,1)] #Colors used to make the display
+#     colors = [rp.random_rgb_float_color() for _ in range(3)]
+#     alphas = rp.as_numpy_array(self.alphas())
+#     image = self.image
+#     assert alphas.shape==(self.num_labels, self.height, self.width)
 
-    composites = []
-    for color in colors:
-        self.set_background_color(color)
-        column=rp.as_numpy_images(self(self.alphas()))
-        composites.append(column)
+#     composites = []
+#     for color in colors:
+#         self.set_background_color(color)
+#         column=rp.as_numpy_images(self(self.alphas()))
+#         composites.append(column)
 
-    label_names=[label.name for label in self.labels]
+#     label_names=[label.name for label in self.labels]
 
-    stats_lines = [
-        self.name,
-        '',
-        'H,W = %ix%i'%(self.height,self.width),
-    ]
+#     stats_lines = [
+#         self.name,
+#         '',
+#         'H,W = %ix%i'%(self.height,self.width),
+#     ]
 
-    def try_add_stat(stat_format, var_name):
-        if var_name in globals():
-            stats_line=stat_format%globals()[var_name]
-            stats_lines.append(stats_line)
+#     def try_add_stat(stat_format, var_name):
+#         if var_name in globals():
+#             stats_line=stat_format%globals()[var_name]
+#             stats_lines.append(stats_line)
 
-    try_add_stat('Gravity: %.2e','GRAVITY'   )
-    try_add_stat('Batch Size: %i','BATCH_SIZE')
-    try_add_stat('Iter: %i','iter_num')
-    try_add_stat('Image Name: %s','image_filename')
-    try_add_stat('Learning Rate: %.2e','LEARNING_RATE')
-    try_add_stat('Guidance: %i%%','GUIDANCE_SCALE')
+#     try_add_stat('Gravity: %.2e','GRAVITY'   )
+#     try_add_stat('Batch Size: %i','BATCH_SIZE')
+#     try_add_stat('Iter: %i','iter_num')
+#     try_add_stat('Image Name: %s','image_filename')
+#     try_add_stat('Learning Rate: %.2e','LEARNING_RATE')
+#     try_add_stat('Guidance: %i%%','GUIDANCE_SCALE')
 
-    stats_image=rp.labeled_image(self.image, rp.line_join(stats_lines), 
-                                 size=15*len(stats_lines), 
-                                 position='bottom', align='center')
+#     stats_image=rp.labeled_image(self.image, rp.line_join(stats_lines), 
+#                                  size=15*len(stats_lines), 
+#                                  position='bottom', align='center')
 
-    composite_grid=rp.grid_concatenated_images([
-        rp.labeled_images(alphas,label_names),
-        *composites
-    ])
+#     composite_grid=rp.grid_concatenated_images([
+#         rp.labeled_images(alphas,label_names),
+#         *composites
+#     ])
     
-    assert rp.is_image(self.image)
-    assert rp.is_image(alphas[0])
-    assert rp.is_image(composites[0][0])
-    assert rp.is_image(composites[1][0])
-    assert rp.is_image(composites[2][0])
+#     assert rp.is_image(self.image)
+#     assert rp.is_image(alphas[0])
+#     assert rp.is_image(composites[0][0])
+#     assert rp.is_image(composites[1][0])
+#     assert rp.is_image(composites[2][0])
 
-    output_image = rp.labeled_image(
-        rp.tiled_images(
-            rp.labeled_images(
-                [
-                    self.image,
-                    alphas[0],
-                    composites[0][0],
-                    composites[1][0],
-                    composites[2][0],
-                ],
-                [
-                    "Input Image",
-                    "Alpha Map",
-                    "Background #1",
-                    "Background #2",
-                    "Background #3",
-                ],
-            ),
-            length=2 + len(composites),
-        ),
-        label_names[0],
-    )
+#     output_image = rp.labeled_image(
+#         rp.tiled_images(
+#             rp.labeled_images(
+#                 [
+#                     self.image,
+#                     alphas[0],
+#                     composites[0][0],
+#                     composites[1][0],
+#                     composites[2][0],
+#                 ],
+#                 [
+#                     "Input Image",
+#                     "Alpha Map",
+#                     "Background #1",
+#                     "Background #2",
+#                     "Background #3",
+#                 ],
+#             ),
+#             length=2 + len(composites),
+#         ),
+#         label_names[0],
+#     )
 
 
-    # output_image = rp.horizontally_concatenated_images(stats_image, composite_grid)
+#     # output_image = rp.horizontally_concatenated_images(stats_image, composite_grid)
 
-    rp.display_image(output_image)
+#     rp.display_image(output_image)
 
-    return output_image
+#     return output_image
 
-PeekabooSegmenter.display=display
+# PeekabooSegmenter.display=display
 
 def get_mean_embedding(prompts:list):
     return torch.mean(
         torch.stack(
-            [s.get_text_embeddings(prompt) for prompt in prompts]
+            [sd.get_text_embeddings(prompt) for prompt in prompts]
         ),
         dim=0
     ).to(device)
@@ -225,7 +226,7 @@ class BaseLabel:
         self.embedding=embedding
         
     def get_sample_image(self):
-        output=s.embeddings_to_imgs(self.embedding)[0]
+        output=sd.embeddings_to_imgs(self.embedding)[0]
         assert rp.is_image(output)
         return output
 
@@ -234,7 +235,7 @@ class BaseLabel:
         
 class SimpleLabel(BaseLabel):
     def __init__(self, name:str):
-        super().__init__(name, s.get_text_embeddings(name).to(device))
+        super().__init__(name, sd.get_text_embeddings(name).to(device))
 
 class MeanLabel(BaseLabel):
     #Test: rp.display_image(rp.horizontally_concatenated_images(MeanLabel('Dogcat','dog','cat').get_sample_image() for _ in range(1)))
@@ -337,8 +338,6 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
     
     
     log_cell('Get Hyperparameters') ########################################################################
-    icecream.ic(GRAVITY, BATCH_SIZE, NUM_ITER, LEARNING_RATE, GUIDANCE_SCALE,  representation, bilateral_kwargs, square_image_method)
-
 
 
     # log_cell('Alpha Initializer') ########################################################################
@@ -352,14 +351,12 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
                         max_step=max_step,
                        ).to(device)
 
-    if 'bilateral' in representation:
-        blur_image=rp.as_numpy_image(p.alphas.bilateral_blur(p.foreground))
-        print("The bilateral blur applied to the input image before/after, to visualize it")
-        rp.display_image(rp.tiled_images(rp.labeled_images([rp.as_numpy_image(p.foreground),blur_image],['before','after'])))
+    # if 'bilateral' in representation:
+    #     blur_image=rp.as_numpy_image(p.alphas.bilateral_blur(p.foreground))
+    #     print("The bilateral blur applied to the input image before/after, to visualize it")
+    #     rp.display_image(rp.tiled_images(rp.labeled_images([rp.as_numpy_image(p.foreground),blur_image],['before','after'])))
 
-    p.display();
-
-
+    # p.display();
     
     # log_cell('Create Optimizers') ########################################################################
 
@@ -371,7 +368,7 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
     # log_cell('Create Logs') ########################################################################
     global iter_num
     iter_num=0
-    timelapse_frames=[]
+    # timelapse_frames=[]
 
 
     # log_cell('Do Training') ########################################################################
@@ -379,6 +376,7 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
     preview_interval=max(1,preview_interval)
     log("Will show preview images every %i iterations"%(preview_interval))
 
+    l1, l2 = [], []
     try:
         display_eta=rp.eta(NUM_ITER)
         for _ in range(NUM_ITER):
@@ -387,35 +385,39 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
 
             alphas=p.alphas()
 
-            for __ in range(BATCH_SIZE):
-                p.randomize_background()
-                composites=p()
-                for label, composite in zip(p.labels, composites):
-                    s.train_step(label.embedding, composite[None], 
-                                 guidance_scale=GUIDANCE_SCALE
-                                )
+            # for __ in range(BATCH_SIZE):
+            assert BATCH_SIZE == 1, 'batchsize != 1'
+            p.randomize_background()
+            composites=p()
 
-            ((alphas.sum())*GRAVITY).backward()
-
+            # for label, composite in zip(p.labels, composites):
+            label, composite = p.labels[0], composites[0]
+            sdsloss = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
+            
+            loss = alphas.sum() * GRAVITY
+            alphaloss = loss.item()
+            loss.backward()
             optim.step()
             optim.zero_grad()
 
-            with torch.no_grad():
-                # if not _%100:
-                    #Don't overflow the notebook
-                    # clear_output()
-                if not _%preview_interval: 
-                    timelapse_frames.append(p.display())
-                    # rp.ptoc()
+            l1.append(sdsloss)
+            l2.append(alphaloss)
+            # with torch.no_grad():
+            #     # if not _%100:
+            #         #Don't overflow the notebook
+            #     if not _%preview_interval: 
+            #         timelapse_frames.append(p.display())
+            #         # rp.ptoc()
     except KeyboardInterrupt:
         log("Interrupted early, returning current results...")
         pass
 
-                
+    p.set_background_color((0,0,0))
     # rp.ptoc()
     results = PeekabooResults(
         #The main output is the alphas
         alphas=rp.as_numpy_array(alphas),
+        output=rp.as_numpy_images(p(p.alphas())),
         
         #Keep track of hyperparameters used
         GRAVITY=GRAVITY,
@@ -423,6 +425,7 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
         NUM_ITER=NUM_ITER,
         GUIDANCE_SCALE=GUIDANCE_SCALE,
         bilateral_kwargs=bilateral_kwargs,
+        lr=LEARNING_RATE,
         representation=representation,
         
         #Keep track of the inputs used
@@ -431,9 +434,9 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
         image_path=image_path,
         
         #Record some extra info
-        preview_image=p.display(),
-        timelapse_frames=rp.as_numpy_array(timelapse_frames),
-        **({'blur_image':blur_image} if 'blur_image' in dir() else {}),
+        # preview_image=p.display(),
+        # timelapse_frames=rp.as_numpy_array(timelapse_frames),
+        # **({'blur_image':blur_image} if 'blur_image' in dir() else {}),
         height=p.height,
         width=p.width,
         p_name=p.name,
@@ -441,11 +444,11 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
         min_step=p.min_step,
         max_step=p.max_step,
         
-        git_hash=rp.get_current_git_hash(), 
-        time_started=rp.r._format_datetime(time_started),
-        time_completed=rp.r._format_datetime(rp.get_current_date()),
+        # git_hash=rp.get_current_git_hash(), 
+        # time_started=rp.r._format_datetime(time_started),
+        # time_completed=rp.r._format_datetime(rp.get_current_date()),
         device=device,
-        computer_name=rp.get_computer_name(),
+        # computer_name=rp.get_computer_name(),
     ) 
     
     output_folder = rp.make_folder('peekaboo_results/%s'%name)
@@ -453,14 +456,59 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
     
 
     save_peekaboo_results(results,output_folder)
-    print("Please wait - creating a training timelapse")
-    clear_output()
-    rp.display_image_slideshow(timelapse_frames)#This can take a bit of time
+    # print("Please wait - creating a training timelapse")
+    # rp.display_image_slideshow(timelapse_frames)#This can take a bit of time
     print("Saved results at %s"%output_folder)
-    icecream.ic(name,label,image_path, GRAVITY, BATCH_SIZE, NUM_ITER, GUIDANCE_SCALE,  bilateral_kwargs)
     
-    return results
+    # Loss plot 저장
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(l1, label='SDS Loss')
+    plt.xlabel('Iteration'); plt.ylabel('Loss')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(l2, label='Alpha Loss')
+    plt.xlabel('Iteration'); plt.ylabel('Loss')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig(f'{output_folder}/loss_plot.png')
+    plt.close()
     
 #Importing this module loads a stable diffusion model. Hope you have a GPU!
-s=sd.StableDiffusion('cuda','CompVis/stable-diffusion-v1-4')
-device=s.device
+sd=sd.StableDiffusion('cuda','CompVis/stable-diffusion-v1-4')
+device=sd.device
+
+if __name__ == "__main__":
+    
+    # # bilateral fourier 용도.
+    # prms = {
+    #     'G': 1e-1/2,
+    #     'iter': 300,
+    #     'lr': 1e-5,
+    #     'B': 1,
+    #     'guidance': 100,
+    #     'representation': 'fourier bilateral',
+    # }
+
+    # raster 용도.
+    prms = {
+        'G': 1e-1/2,
+        'iter': 300,
+        'lr': 1,
+        'B': 1,
+        'guidance': 100,
+        'representation': 'raster',
+    }
+
+    run_peekaboo(
+        name='Mario',
+        image="https://i1.sndcdn.com/artworks-000160550668-iwxjgo-t500x500.jpg",
+        GRAVITY=prms['G'],
+        NUM_ITER=prms['iter'],
+        LEARNING_RATE=prms['lr'],
+        BATCH_SIZE=prms['B'],
+        GUIDANCE_SCALE=prms['guidance'],
+        representation=prms['representation'],
+        )

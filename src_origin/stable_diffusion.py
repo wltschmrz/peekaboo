@@ -39,7 +39,7 @@ class StableDiffusion(nn.Module):
         
         # Unlike the original code, I'll load these from the pipeline. This lets us use dreambooth models.
         pipe = StableDiffusionPipeline.from_pretrained(checkpoint_path, torch_dtype=torch.float)
-        pipe.safety_checker = lambda images, _: images, False # Disable the NSFW checker (slows things down)
+        pipe.safety_checker = lambda images, _: (images, False) # Disable the NSFW checker (slows things down)
     
         pipe.scheduler = PNDMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=self.num_train_timesteps) #Error from scheduling_lms_discrete.py
         
@@ -55,7 +55,6 @@ class StableDiffusion(nn.Module):
         self.checkpoint_path=checkpoint_path
             
         self.alphas = self.scheduler.alphas_cumprod.to(self.device) # for convenience
-
         print(f'[INFO] sd.py: loaded stable diffusion!')
 
     def get_text_embeddings(self, prompts: Union[str, List[str]])->torch.Tensor:
@@ -118,9 +117,11 @@ class StableDiffusion(nn.Module):
         w = (1 - self.alphas[t])
         grad = w * (noise_pred - noise)
 
+        mse_loss = ((noise_pred - noise) ** 2).mean().item()
+
         # manually backward, since we omitted an item in grad and cannot simply autodiff
         latents.backward(gradient=grad, retain_graph=True)
-        return 0 # dummy loss value
+        return mse_loss # dummy loss value
 
     def produce_latents(self, text_embeddings:torch.Tensor, height:int=512, width:int=512, num_inference_steps=50, guidance_scale=7.5, latents=None)->torch.Tensor:
         assert len(text_embeddings.shape)==3 and text_embeddings.shape[-2:]==(77,768)
@@ -183,7 +184,7 @@ class StableDiffusion(nn.Module):
 
         imgs = 2 * imgs - 1
         posterior = self.vae.encode(imgs)
-        latents = posterior.sample() * 0.18215
+        latents = posterior.latent_dist.sample() * 0.18215
         
         assert len(latents.shape)==4 and latents.shape[1]==4 #[B, 4, H, W]
 
