@@ -80,8 +80,12 @@ class BilateralProxyBlur:
                 tolerance: float = .08,
                 sigma: float = 5,
                 iterations: int = 10):
-       self.weights = get_weight_matrix(image, sigma, kernel_size, tolerance)
-       self.iterations = iterations
+        self.image = image
+        self.kernel_size = kernel_size
+        self.tolerance = tolerance
+        self.sigma = sigma
+        self.iterations = iterations
+        self.weights = get_weight_matrix(image, sigma, kernel_size, tolerance)
        
    def __call__(self, image: torch.Tensor) -> torch.Tensor:
        return apply_weight_matrix(image, self.weights, self.iterations)

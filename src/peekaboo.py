@@ -1,16 +1,22 @@
+import os
+import sys
+proj_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src_dir = os.path.join(proj_dir, 'src')
+sys.path.extend([proj_dir, src_dir])
+
 import numpy as np
-import rp
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-from easydict import EasyDict
-
-import source.stable_diffusion as diff
-from source.bilateral_blur import BilateralProxyBlur
-from source.learnable_textures import (LearnableImageFourier,
-                                       LearnableImageFourierBilateral,
-                                       LearnableImageRaster,
-                                       LearnableImageRasterBilateral,
-                                       )
+import rp
+import src.stable_diffusion as diff
+from src.bilateral_blur import BilateralProxyBlur
+from src.learnable_textures import (
+    LearnableImageFourier,
+    LearnableImageFourierBilateral,
+    LearnableImageRaster,
+    LearnableImageRasterBilateral,
+)
 
 sd = diff.StableDiffusion('cuda','CompVis/stable-diffusion-v1-4')
 device = sd.device
@@ -140,19 +146,78 @@ def run_peekaboo(name: str,
             p.randomize_background()
             composites = p()
             for label, composite in zip(p.labels, composites):
-                sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
-        ((alphas.sum()) * GRAVITY).backward()
+                sdsloss = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
+        loss = alphas.sum() * GRAVITY
+        alphaloss = loss.item()
+        loss.backward()
         optim.step()
         optim.zero_grad()
+        return sdsloss, alphaloss
 
+    l1, l2 = [], []
     try:
         for i in range(NUM_ITER):
-            train_step()
+            sdsloss, alphaloss = train_step()
+            l1.append(sdsloss)
+            l2.append(alphaloss)
             if not i % preview_interval:
                 with torch.no_grad():
-                    pass  # log
+                    pass  # preview result saving
     except KeyboardInterrupt:
         pass
     
     output_folder = rp.make_folder(f'peekaboo_results/{name}')
     output_folder_path += f'{len(rp.get_subfolders(output_folder)):03d}'
+    os.makedirs(output_folder_path, exist_ok=True)
+    
+    # Loss plot 저장
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(l1, label='SDS Loss')
+    plt.xlabel('Iteration'); plt.ylabel('Loss')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(l2, label='Alpha Loss')
+    plt.xlabel('Iteration'); plt.ylabel('Loss')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig(f'{output_folder_path}/loss_plot.png')
+    plt.close()
+    
+    # 최종 결과 저장
+    with torch.no_grad():
+        final_result = p()
+        for idx, (label, result) in enumerate(zip(p.labels, final_result)):
+            save_path = f'{output_folder_path}/{label.name}_result.png'
+            rp.save_image(result.cpu().numpy(), save_path)
+        
+        # alpha mask도 저장
+        alpha_mask = p.alphas().cpu().numpy()
+        rp.save_image(alpha_mask, f'{output_folder_path}/alpha_mask.png')
+    
+    return final_result, (l1, l2)
+    
+
+if __name__ == "__main__":
+    
+    prms = {
+        'G': 1e-1/2,
+        'iter': 300,
+        'lr': 1e-5,
+        'B': 1,
+        'guidance': 100,
+        'representation': 'fourier bilateral',
+    }
+
+    run_peekaboo(
+        name='Mario',
+        image="https://i1.sndcdn.com/artworks-000160550668-iwxjgo-t500x500.jpg",
+        GRAVITY=prms['G'],
+        NUM_ITER=prms['iter'],
+        LEARNING_RATE=prms['lr'],
+        BATCH_SIZE=prms['B'],
+        GUIDANCE_SCALE=prms['guidance'],
+        representation=prms['representation'],
+        )
