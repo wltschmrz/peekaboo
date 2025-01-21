@@ -116,12 +116,13 @@ class StableDiffusion(nn.Module):
         # w(t), sigma_t^2
         w = (1 - self.alphas[t])
         grad = w * (noise_pred - noise)
-
+        
         mse_loss = ((noise_pred - noise) ** 2).mean().item()
 
         # manually backward, since we omitted an item in grad and cannot simply autodiff
         latents.backward(gradient=grad, retain_graph=True)
         return mse_loss # dummy loss value
+        
 
     def produce_latents(self, text_embeddings:torch.Tensor, height:int=512, width:int=512, num_inference_steps=50, guidance_scale=7.5, latents=None)->torch.Tensor:
         assert len(text_embeddings.shape)==3 and text_embeddings.shape[-2:]==(77,768)
