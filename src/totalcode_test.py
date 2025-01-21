@@ -26,8 +26,6 @@ from src.learnable_textures import (
     LearnableImageRasterBilateral,
 )
 
-print('text')
-
 # Suppress partial model loading warning
 logging.set_verbosity_error()
 
@@ -99,20 +97,20 @@ class StableDiffusion(nn.Module):
 
         latents = self.encode_imgs(pred_rgb_512)
 
-        # with torch.no_grad():
-        noise = torch.randn_like(latents)
-        latents_noisy = self.scheduler.add_noise(latents, noise, t.cpu())
-        noise_pred_cat = self.unet(torch.cat([latents_noisy] * 2), t, encoder_hidden_states=text_embeddings)['sample']
-        noise_pred_uncond, noise_pred_text = noise_pred_cat.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        with torch.no_grad():
+            noise = torch.randn_like(latents)
+            latents_noisy = self.scheduler.add_noise(latents, noise, t.cpu())
+            noise_pred_cat = self.unet(torch.cat([latents_noisy] * 2), t, encoder_hidden_states=text_embeddings)['sample']
+            noise_pred_uncond, noise_pred_text = noise_pred_cat.chunk(2)
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-        # w = (1 - self.alphas[t])
+        w = (1 - self.alphas[t])
         # loss = w * ((noise_pred - noise) ** 2).mean()
-        loss = torch.abs(noise - noise_pred).sum()
         # loss.backward(retain_graph=True)
-        # grad = w * (noise_pred - noise)
-        # latents.backward(gradient=grad, retain_graph=True)
-        return loss
+        grad = w * (noise_pred - noise)
+        latents.backward(gradient=grad, retain_graph=True)
+        # loss = torch.abs(noise - noise_pred).sum()
+        return 0  # loss
 
     def encode_imgs(self, imgs:torch.Tensor)->torch.Tensor:
         imgs = 2 * imgs - 1
@@ -266,8 +264,8 @@ def run_peekaboo(name: str,
     except KeyboardInterrupt:
         pass
     
-    output_folder = rp.make_folder(f'peekaboo_results/{name}')
-    output_folder_path += f'{len(rp.get_subfolders(output_folder)):03d}'
+    output_folder_path = rp.make_folder(f'peekaboo_results/{name}')
+    output_folder_path += f'{len(rp.get_subfolders(output_folder_path)):03d}'
     os.makedirs(output_folder_path, exist_ok=True)
     
     # Loss plot 저장
