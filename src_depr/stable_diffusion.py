@@ -32,17 +32,9 @@ class StableDiffusion(nn.Module):
         print('[INFO] sd.py: loading stable diffusion...please make sure you have run `huggingface-cli login`.')
         
         # Initialize pipeline with PNDM scheduler (load from pipeline. let us use dreambooth models.)
-        pipe = StableDiffusionPipeline.from_pretrained(
-            checkpoint_path, 
-            torch_dtype=torch.float,
-            scheduler=PNDMScheduler(  # Error from scheduling_lms_discrete.py
-                beta_start=0.00085,
-                beta_end=0.012,
-                beta_schedule="scaled_linear",
-                num_train_timesteps=self.num_train_timesteps
-            )
-        )
+        pipe = StableDiffusionPipeline.from_pretrained(checkpoint_path, torch_dtype=torch.float)
         pipe.safety_checker = lambda images, _: (images, False)  # Disable the NSFW checker (slows things down)
+        pipe.scheduler=PNDMScheduler(beta_start=0.00085,beta_end=0.012,beta_schedule="scaled_linear",num_train_timesteps=self.num_train_timesteps)
         
         # Setup components and move to device
         self.pipe = pipe
@@ -64,7 +56,6 @@ class StableDiffusion(nn.Module):
         self.uncond_text = ''
         self.checkpoint_path = checkpoint_path
         self.alphas = self.scheduler.alphas_cumprod.to(self.device) # for convenience
-
         print(f'[INFO] sd.py: loaded stable diffusion!')
 
     def get_text_embeddings(self, prompts: Union[str, List[str]]) -> torch.Tensor:
@@ -85,17 +76,11 @@ class StableDiffusion(nn.Module):
         # Get text and unconditional embeddings
         text_embeddings = get_embeddings(prompts)  # [B, 77, 768]
         uncond_embeddings = get_embeddings([self.uncond_text] * len(prompts))  # [B, 77, 768]
-
         assert (uncond_embeddings == uncond_embeddings[0][None]).all()  # All the same
         
         return torch.cat([uncond_embeddings, text_embeddings])  # First B rows: uncond, Last B rows: cond
 
-    def train_step(
-    self, text_embeddings: torch.Tensor, pred_rgb: torch.Tensor, 
-    guidance_scale: float = 100, t: Optional[int] = None
-    ):
-        """Generate dream-loss gradients. Main training step for image generation."""        
-        
+    def train_step(self, text_embeddings: torch.Tensor, pred_rgb: torch.Tensor, guidance_scale: float = 100, t: Optional[int] = None):
         # Prepare image and timestep
         pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode='bilinear', align_corners=False)
         t = t if t is not None else torch.randint(self.min_step, self.max_step + 1, [1], device=self.device)
@@ -104,11 +89,11 @@ class StableDiffusion(nn.Module):
         # Encode image to latents (with grad)
         latents = self.encode_imgs(pred_rgb_512)
 
-        # # Predict noise without grad
-        # with torch.no_grad():
-        noise = torch.randn_like(latents)
-        latents_noisy = self.scheduler.add_noise(latents, noise, t.cpu())
-        noise_pred = self.unet(torch.cat([latents_noisy] * 2), t, encoder_hidden_states=text_embeddings)['sample']
+        # Predict noise without grad
+        with torch.no_grad():
+            noise = torch.randn_like(latents)
+            latents_noisy = self.scheduler.add_noise(latents, noise, t.cpu())
+            noise_pred = self.unet(torch.cat([latents_noisy] * 2), t, encoder_hidden_states=text_embeddings)['sample']
 
         # Guidance . High value from paper
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -116,11 +101,13 @@ class StableDiffusion(nn.Module):
 
         # Calculate and apply gradients
         w = (1 - self.alphas[t])
-        loss = w * ((noise_pred - noise) ** 2).mean()
-        loss.backward(retain_graph=True)
-        # grad = w * (noise_pred - noise)
-        # latents.backward(gradient=grad, retain_graph=True)
-        return loss.item()  # dummy loss value
+        grad = w * (noise_pred - noise)
+        latents.backward(gradient=grad, retain_graph=True)
+
+        noise_mse = ((noise_pred - noise) ** 2).mean().item()
+        uncond, cond = noise_pred_uncond.abs().mean().item(), noise_pred_text.abs().mean().item()
+        c_minus_unc = (noise_pred_uncond - noise_pred_text).abs().mean().item()
+        return (noise_mse, uncond, cond, c_minus_unc)
 
     def encode_imgs(self, imgs:torch.Tensor)->torch.Tensor:
         imgs = 2 * imgs - 1  # [-1, 1]

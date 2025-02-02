@@ -7,7 +7,7 @@
 import os
 import sys
 proj_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-src_dir = os.path.join(proj_dir, 'src')
+src_dir = os.path.join(proj_dir, 'src_depr')
 sys.path.extend([proj_dir, src_dir])
 
 from tqdm import tqdm
@@ -19,8 +19,8 @@ import torch.nn.functional as F
 from diffusers import PNDMScheduler, StableDiffusionPipeline
 from transformers import logging
 import rp
-from src.bilateral_blur import BilateralProxyBlur
-from src.learnable_textures import (
+from src_depr.bilateral_blur import BilateralProxyBlur
+from src_depr.learnable_textures import (
     LearnableImageFourier,
     LearnableImageFourierBilateral,
     LearnableImageRaster,

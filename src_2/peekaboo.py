@@ -252,7 +252,6 @@ def run_peekaboo(name:str, image:Union[str,np.ndarray], label:Optional['BaseLabe
 
             # for label, composite in zip(p.labels, composites):
             label, composite = p.labels[0], composites[0]
-            composite = composite * 0
             sdsloss, unc, con, cont = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
             loss = alphas.mean() * GRAVITY
             alphaloss = loss.item()

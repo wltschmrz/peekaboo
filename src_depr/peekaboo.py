@@ -1,7 +1,8 @@
 import os
 import sys
+
 proj_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-src_dir = os.path.join(proj_dir, 'src')
+src_dir = os.path.join(proj_dir, 'src_depr')
 sys.path.extend([proj_dir, src_dir])
 
 import numpy as np
@@ -10,9 +11,9 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 import rp
-import src.stable_diffusion as diff
-from src.bilateral_blur import BilateralProxyBlur
-from src.learnable_textures import (
+import src_depr.stable_diffusion as diff
+from src_depr.bilateral_blur import BilateralProxyBlur
+from src_depr.learnable_textures import (
     LearnableImageFourier,
     LearnableImageFourierBilateral,
     LearnableImageRasterSigmoided,
@@ -82,6 +83,7 @@ class PeekabooSegmenter(nn.Module):
     def _preprocess_image(self, image):
         image = rp.cv_resize_image(image, (self.height, self.width))
         image = rp.as_rgb_image(image)  # 3 channels in HWC form
+        assert image.shape==(self.height,self.width,3) and image.min()>=0 and image.max()<=1
         return rp.as_float_image(image)  # value in [0, 1]
 
     def set_background_color(self, color):
@@ -149,28 +151,25 @@ def run_peekaboo(name: str,
     preview_interval = max(1, NUM_ITER // 10)
 
     def train_step():
-        alphas = pkboo.alphas()
-        # for _ in range(BATCH_SIZE):
-        assert BATCH_SIZE == 1, 'batchsize != 1'
-        
+        alphas = pkboo.alphas()        
         pkboo.randomize_background()
         composites = pkboo()
         
         # for label, composite in zip(p.labels, composites):
-        assert len(pkboo.labels) == len(composites) == 1, "len != 1"
         label, composite = pkboo.labels[0], composites[0]
-        sdsloss = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
+        plotdummy = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
         
-        loss = alphas.sum() * GRAVITY
+        loss = alphas.mean() * GRAVITY
         alphaloss = loss.item()
         loss.backward()
         optim.step()
         optim.zero_grad()
+        sdsloss, uncond, cond, c_minus_unc = plotdummy
         return sdsloss, alphaloss
 
     l1, l2 = [], []
     try:
-        for i in tqdm(range(NUM_ITER)):
+        for iter_num in tqdm(range(NUM_ITER)):
             sdsloss, alphaloss = train_step()
             l1.append(sdsloss)
             l2.append(alphaloss)
@@ -242,7 +241,7 @@ if __name__ == "__main__":
     
     # # bilateral fourier 용도.
     # prms = {
-    #     'G': 1e-1/2,
+    #     'G': 3000,
     #     'iter': 300,
     #     'lr': 1e-5,
     #     'B': 1,
@@ -252,7 +251,7 @@ if __name__ == "__main__":
 
     # raster 용도.
     prms = {
-        'G': 1e-1/2,
+        'G': 3000,
         'iter': 300,
         'lr': 1,
         'B': 1,
