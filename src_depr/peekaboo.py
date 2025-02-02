@@ -148,94 +148,107 @@ def run_peekaboo(name: str,
     ).to(device)
 
     optim = torch.optim.SGD(list(pkboo.parameters()), lr=LEARNING_RATE)
-    preview_interval = max(1, NUM_ITER // 10)
 
     def train_step():
-        alphas = pkboo.alphas()        
+        alphas = pkboo.alphas()
         pkboo.randomize_background()
         composites = pkboo()
         
         # for label, composite in zip(p.labels, composites):
         label, composite = pkboo.labels[0], composites[0]
-        plotdummy = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
+        dummy_for_plot = sd.train_step(label.embedding, composite[None], guidance_scale=GUIDANCE_SCALE)
         
         loss = alphas.mean() * GRAVITY
         alphaloss = loss.item()
-        loss.backward()
-        optim.step()
-        optim.zero_grad()
-        sdsloss, uncond, cond, c_minus_unc = plotdummy
-        return sdsloss, alphaloss
+        loss2 = torch.abs(alphas[:, 1:, :] - alphas[:, :-1, :]).mean() + torch.abs(alphas[:, :, 1:] - alphas[:, :, :-1]).mean()
+        loss += loss2 * 5000
+        print(loss2.item())
+        loss.backward(); optim.step(); optim.zero_grad()
+        sdsloss, uncond, cond, eps_diff = dummy_for_plot
+        return sdsloss, alphaloss, uncond, cond, eps_diff
 
-    l1, l2 = [], []
+    list_sds, list_alpha, list_uncond_eps, list_cond_eps, list_eps_differ = [], [], [], [], []
+    list_dummy = (list_sds, list_alpha, list_uncond_eps, list_cond_eps, list_eps_differ)
     try:
         for iter_num in tqdm(range(NUM_ITER)):
-            sdsloss, alphaloss = train_step()
-            l1.append(sdsloss)
-            l2.append(alphaloss)
-            # if not i % preview_interval:
-                # with torch.no_grad():
-                #     pass  # preview result saving
+            dummy_for_plot = train_step()
+            for li, element in zip(list_dummy, dummy_for_plot):
+                li.append(element)
+
     except KeyboardInterrupt:
+        print("Interrupted early, returning current results...")
         pass
     
-    output_folder = rp.make_folder('peekaboo_results/%s'%name)
-    output_folder += '/%03i'%len(rp.get_subfolders(output_folder))
-    rp.make_folder(output_folder)
-    
-    # Loss plot 저장
-    plt.figure(figsize=(10, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(l1, label='SDS Loss')
-    plt.xlabel('Iteration'); plt.ylabel('Loss')
-    plt.legend()
-
-    plt.subplot(1, 2, 2)
-    plt.plot(l2, label='Alpha Loss')
-    plt.xlabel('Iteration'); plt.ylabel('Loss')
-    plt.legend()
-    
-    plt.tight_layout()
-    plt.savefig(f'{output_folder}/loss_plot.png')
-    plt.close()
-    
-    # 최종 결과 저장
-    with torch.no_grad():
-        alphas = pkboo.alphas()
-        result = pkboo(alphas)
-        save_image(rp.as_numpy_array(alphas), f'{output_folder}/alpha.png')
-        save_image(rp.as_numpy_images(result), f'{output_folder}/result.png')
-    
-    hparams = {
-    "GRAVITY": GRAVITY,
-    "NUM_ITER": NUM_ITER,
-    "LEARNING_RATE": LEARNING_RATE,
-    "GUIDANCE_SCALE": GUIDANCE_SCALE,
-    "representation": representation,
+    pkboo.set_background_color((0,0,0))
+    alphas = pkboo.alphas()
+    results = {
+        "_image":image,
+        "alphas":rp.as_numpy_array(alphas),
+        "output":rp.as_numpy_images(pkboo(pkboo.alphas())),
+        
+        "representation":representation,
+        "NUM_ITER":NUM_ITER,
+        "GRAVITY":GRAVITY,
+        "lr":LEARNING_RATE,
+        "GUIDANCE_SCALE":GUIDANCE_SCALE,
+        "BATCH_SIZE":BATCH_SIZE,
+        "bilateral_kwargs":bilateral_kwargs,
+        
+        "p_name":pkboo.name,
+        "label":label,
+        "min_step":pkboo.min_step,
+        "max_step":pkboo.max_step,
+        "device":device,
     }
 
-    save_hparams_as_json(hparams, f"{output_folder}/params.json")
-    
-def save_image(value, path):
-    dir_name = os.path.dirname(path)
-    if dir_name and not os.path.exists(dir_name):
-        os.makedirs(dir_name, exist_ok=True)
-    if rp.is_image(value):
-        rp.save_image(value, path)
-    elif isinstance(value, np.ndarray) and rp.is_image(value[0]):
-        subdir = os.path.splitext(path)[0]  # 확장자(.png 등) 제거
-        os.makedirs(subdir, exist_ok=True)
-        for i, img in enumerate(value):
-            rp.save_image(img, os.path.join(subdir, f"{i}.png"))
-    else:
-        npy_path = os.path.splitext(path)[0] + ".npy"
-        np.save(npy_path, value)
+    output_folder = rp.make_folder('peekaboo_results/%s'%name)
+    output_folder += '/%03i'%len(rp.get_subfolders(output_folder))
+    save_peekaboo_results(results, output_folder, list_dummy)
+    print(f"Saved results at {output_folder}")
 
-def save_hparams_as_json(hparams: dict, path: str):
-    dir_name = os.path.dirname(path)
-    if dir_name and not os.path.exists(dir_name):
-        os.makedirs(dir_name, exist_ok=True)
-    rp.save_json(hparams, path, pretty=True)
+def save_peekaboo_results(results, new_folder_path, list_dummy):
+    import json
+    assert not rp.folder_exists(new_folder_path), f'Please use a different name, not {new_folder_path}'
+    rp.make_folder(new_folder_path)
+    with rp.SetCurrentDirectoryTemporarily(new_folder_path):
+        print(f"Saving PeekabooResults to {new_folder_path}")
+        params = {}
+        for key, value in results.items():
+            if rp.is_image(value):  # Save a single image
+                rp.save_image(value, f'{key}.png')
+            elif isinstance(value, np.ndarray) and rp.is_image(value[0]):  # Save a folder of images
+                rp.make_directory(key)
+                with rp.SetCurrentDirectoryTemporarily(key):
+                    for i in range(len(value)):
+                        rp.save_image(value[i], f'{i}.png')
+            elif isinstance(value, np.ndarray):  # Save a generic numpy array
+                np.save(f'{key}.npy', value) 
+            else:
+                try:
+                    json.dumps({key: value})
+                    params[key] = value  #Assume value is json-parseable
+                except Exception:
+                    params[key] = str(value)
+        rp.save_json(params, 'params.json', pretty=True)
+        print(f"Done saving PeekabooResults to {new_folder_path}!")
+    
+    # Loss plot 저장
+    sds, alpha, uncond, cond, eps = list_dummy
+    plt.figure(figsize=(20, 10))
+    plt.subplot(2, 1, 1); plt.plot(sds, label='SDS Loss')
+    plt.xlabel('Iteration'); plt.ylabel('Loss'); plt.legend()
+    plt.subplot(2, 1, 2); plt.plot(alpha, label='Alpha Loss')
+    plt.xlabel('Iteration'); plt.ylabel('Loss'); plt.legend()
+    plt.tight_layout(); plt.savefig(f'{new_folder_path}/loss_plot.png'); plt.close()
+
+    plt.figure(figsize=(25, 10))
+    plt.subplot(3, 1, 1); plt.plot(uncond, label='uncond')
+    plt.xlabel('Iteration'); plt.ylabel('abs mean'); plt.legend()
+    plt.subplot(3, 1, 2); plt.plot(cond, label='cond')
+    plt.xlabel('Iteration'); plt.ylabel('abs mean'); plt.legend()
+    plt.subplot(3, 1, 3); plt.plot(eps, label='difference bet eps')
+    plt.xlabel('Iteration'); plt.ylabel('abs mean'); plt.legend()
+    plt.tight_layout(); plt.savefig(f'{new_folder_path}/eps_plot.png'); plt.close()
 
 if __name__ == "__main__":
     
